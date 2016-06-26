@@ -1,0 +1,11 @@
+[package]
+name = "paths"
+version = "0.1.0"
+authors = ["Fredrik Jonsén <fredrikjonsen@gmail.com>"]
+
+[dependencies]
+piston = "*"
+piston2d-graphics="*"
+pistoncore-glutin_window = "*"
+piston2d-opengl_graphics = "*"
+lazy_static = "*"
