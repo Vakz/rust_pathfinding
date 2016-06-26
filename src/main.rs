@@ -78,7 +78,7 @@ impl From<(Point, usize)> for WeightedPoint {
 }
 
 impl App {
-    const SIDE: usize = 40;
+    const SIDE: usize = 100;
 
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
@@ -148,7 +148,7 @@ impl App {
     }
 
     fn is_pathable_point(&self, p: &Point) -> bool {
-        if p.x > App::SIDE || p.y > App::SIDE {
+        if p.x >= App::SIDE || p.y >= App::SIDE {
             return false;
         }
         match self.grid[p.x][p.y] {
@@ -164,13 +164,10 @@ impl App {
                 if (x, y) == (0,0) { continue; }
                 let n_x = current.x as i32 + x;
                 let n_y = current.y as i32 + y;
-                if n_x < 0 || n_x >= App::SIDE as i32 { continue; }
-                if n_y < 0 || n_y >= App::SIDE as i32{ continue; }
-                match self.grid[n_x as usize][n_y as usize] {
-                    Block::Blocked => continue,
-                    _ => {}
+                let p = Point::from((n_x as usize, n_y as usize));
+                if self.is_pathable_point(&p) {
+                    neighbors.push_back(Point::from((n_x as usize, n_y as usize)));
                 }
-                neighbors.push_back(Point::from((n_x as usize, n_y as usize)));
             }
         }
         neighbors
