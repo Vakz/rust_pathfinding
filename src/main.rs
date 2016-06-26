@@ -78,7 +78,7 @@ impl From<(Point, usize)> for WeightedPoint {
 }
 
 impl App {
-    const SIDE: usize = 20;
+    const SIDE: usize = 40;
 
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
@@ -122,7 +122,7 @@ impl App {
                             let col = if on_path { WHITE } else { BLACK };
                             let (f_x, f_y) = (x+5f64, y+15f64);
                             let transform = c.transform.trans(f_x, f_y);
-                            text(col, 14, &w.to_string(), &mut font, transform, gl);
+                            text(col, 16, &w.to_string(), &mut font, transform, gl);
                         },
                         _ => {}
                     };
@@ -147,7 +147,17 @@ impl App {
         self.path.clear();
     }
 
-    fn get_neighbors(&self, current: &Point) -> LinkedList<Point> {
+    fn is_pathable_point(&self, p: &Point) -> bool {
+        if p.x > App::SIDE || p.y > App::SIDE {
+            return false;
+        }
+        match self.grid[p.x][p.y] {
+            Block::Blocked => false,
+            _ => true
+        }
+    }
+
+    fn get_diagonal_neighbors(&self, current: &Point) -> LinkedList<Point> {
         let mut neighbors = LinkedList::new();
         for x in -1i32..2i32 {
             for y in -1i32..2i32 {
@@ -163,6 +173,25 @@ impl App {
                 neighbors.push_back(Point::from((n_x as usize, n_y as usize)));
             }
         }
+        neighbors
+    }
+
+    fn get_neighbors(&self, current: &Point) -> LinkedList<Point> {
+        let neighbors = LinkedList::<Point>::new();
+        let mut vals: Vec<(i32,i32)> = vec![(0,1), (1,0)];
+        if current.x > 0 { vals.push((-1,0)); }
+        if current.y > 0 { vals.push((0,-1)); }
+        let mut neighbors = LinkedList::new();
+        for n in &vals {
+            let n_x = ((current.x as i32) + n.0) as usize;
+            let n_y = ((current.y as i32) + n.1) as usize;
+            let p = Point::from((n_x, n_y));
+            if self.is_pathable_point(&p) {
+                neighbors.push_back(p);
+            }
+
+        }
+
         neighbors
     }
 
@@ -291,7 +320,7 @@ impl App {
 fn main() {
     let opengl = OpenGL::V3_2;
 
-    const WINDOW_SIDE: u32 = 800;
+    const WINDOW_SIDE: u32 = 1200;
 
     let mut window: Window =
         WindowSettings::new("spinning-square", [WINDOW_SIDE, WINDOW_SIDE])
@@ -313,8 +342,8 @@ fn main() {
     };
 
     let mut events = window.events();
-    events.set_max_fps(1);
-    events.set_ups(10);
+    events.set_max_fps(60);
+    events.set_ups(60);
     while let Some(e) = events.next(&mut window) {
 
         if let Some(r) = e.render_args() {
