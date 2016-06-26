@@ -17,25 +17,68 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::io::BufReader;
 use std::collections::LinkedList;
+use std::collections::BinaryHeap;
+use std::cmp::Ordering;
 
 #[derive(Debug)]
 enum Block {
     Blocked,
-    Weighted { weight: u32, on_path: bool },
+    Weighted { weight: usize, on_path: bool },
 }
 
 pub struct App {
     gl: GlGraphics,
-    window_side: u32,
-    path: LinkedList<(u32, u32)>,
+    window_side: usize,
+    path: LinkedList<Point>,
     grid: Vec<Vec<Block>>,
-    location: (u32, u32),
-    start: Option<(u32, u32)>,
-    end: Option<(u32, u32)>
+    location: Point,
+    start: Option<Point>,
+    end: Option<Point>
+}
+
+#[derive(PartialEq,Eq,Clone,Copy)]
+struct Point {
+    pub x: usize,
+    pub y: usize
+}
+
+impl From<(usize, usize)> for Point {
+    fn from(f: (usize, usize)) -> Point {
+        Point {
+            x: f.0,
+            y: f.1
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+struct WeightedPoint {
+    pub point: Point,
+    pub weight: usize
+}
+
+impl Ord for WeightedPoint {
+    fn cmp(&self, other: &WeightedPoint) -> Ordering {
+        other.weight.cmp(&self.weight)
+    }
+}
+impl PartialOrd for WeightedPoint {
+    fn partial_cmp(&self, other: &WeightedPoint) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<(Point, usize)> for WeightedPoint {
+    fn from(f: (Point, usize)) -> WeightedPoint {
+        WeightedPoint {
+            point: f.0,
+            weight: f.1
+        }
+    }
 }
 
 impl App {
-    const SIDE: u32 = 20;
+    const SIDE: usize = 20;
 
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
@@ -92,9 +135,9 @@ impl App {
         {
             let mut it = self.path.iter();
             while let Some(current) = it.next() {
-                match self.grid[current.0 as usize][current.1 as usize] {
+                match self.grid[current.x][current.y] {
                     Block::Weighted {weight: w, on_path: _ } => {
-                        self.grid[current.0 as usize][current.1 as usize] = Block::Weighted { weight: w, on_path: false };
+                        self.grid[current.x][current.y] = Block::Weighted { weight: w, on_path: false };
                     },
                     _ => {}
                 };
@@ -104,45 +147,53 @@ impl App {
         self.path.clear();
     }
 
-    fn get_neighbors(&self, current: &(u32, u32)) -> LinkedList<(u32, u32)> {
+    fn get_neighbors(&self, current: &Point) -> LinkedList<Point> {
         let mut neighbors = LinkedList::new();
         for x in -1i32..2i32 {
             for y in -1i32..2i32 {
                 if (x, y) == (0,0) { continue; }
-                let n_x = current.0 as i32 + x;
-                let n_y = current.1 as i32 + y;
+                let n_x = current.x as i32 + x;
+                let n_y = current.y as i32 + y;
                 if n_x < 0 || n_x >= App::SIDE as i32 { continue; }
                 if n_y < 0 || n_y >= App::SIDE as i32{ continue; }
                 match self.grid[n_x as usize][n_y as usize] {
                     Block::Blocked => continue,
                     _ => {}
                 }
-                neighbors.push_back((n_x as u32, n_y as u32));
+                neighbors.push_back(Point::from((n_x as usize, n_y as usize)));
             }
         }
         neighbors
     }
 
-    fn calc_path(&mut self) {
-        type CameFromType = (u32, u32, bool);
+    fn get_weight(&self, p: Point) -> usize {
+        let ref point = self.grid[p.x][p.y];
+        match point {
+            &Block::Weighted { weight, .. } => weight,
+            _ => 0
+        }
+    }
 
-        let mut frontier = LinkedList::new();
-
+    fn calc_dijkstras_path(&mut self) {
+        let mut frontier = BinaryHeap::new();
         if self.start.is_none() || self.end.is_none() { return };
+        let s = WeightedPoint::from((self.start.unwrap(), 0));
+        frontier.push(s);
 
-        frontier.push_back(self.start.clone().unwrap());
-
-        let mut came_from = [[(0,0,false); App::SIDE as usize]; App::SIDE as usize];
+        let mut came_from = [[Point::from((0,0)); App::SIDE]; App::SIDE];
+        let mut cost_so_far = [[std::usize::MAX; App::SIDE]; App::SIDE];
+        cost_so_far[s.point.x][s.point.y] = 0;
 
         'outer: while !frontier.is_empty() {
-            let current = frontier.pop_front();
-            if let Some(cur) = current {
-                let neighbors = self.get_neighbors(&cur);
+            if let Some(current)  = frontier.pop() {
+                let neighbors = self.get_neighbors(&current.point);
                 let mut it = neighbors.iter();
                 while let Some(neighbor) = it.next() {
-                    if !came_from[neighbor.0 as usize][neighbor.1 as usize].2 {
-                        frontier.push_back(neighbor.clone());
-                        came_from[neighbor.0 as usize][neighbor.1 as usize] = (cur.0, cur.1, true);
+                    let new_cost = cost_so_far[current.point.x][current.point.y] + self.get_weight(neighbor.clone());
+                    if new_cost < cost_so_far[neighbor.x][neighbor.y] {
+                        cost_so_far[neighbor.x][neighbor.y] = new_cost;
+                        frontier.push(WeightedPoint::from((neighbor.clone(), new_cost)));
+                        came_from[neighbor.x][neighbor.y] = current.point;
                         if neighbor == &self.end.unwrap() { break 'outer; }
                     }
                 }
@@ -155,7 +206,46 @@ impl App {
         let goal = self.start.clone().unwrap();
         self.path.push_back(current);
         while current != goal {
-            current = (came_from[current.0 as usize][current.1 as usize].0, came_from[current.0 as usize][current.1 as usize].1);
+            let cm = came_from[current.x][current.y];
+            current = Point::from((cm.x, cm.y));
+            self.path.push_back(current);
+        }
+        self.enter_path();
+    }
+
+    fn calc_breadth_first_path(&mut self) {
+        type CameFromType = (Point, bool);
+
+        let mut frontier = LinkedList::new();
+
+        if self.start.is_none() || self.end.is_none() { return };
+
+        frontier.push_back(self.start.clone().unwrap());
+
+        let mut came_from = [[(Point::from((0,0)),false); App::SIDE]; App::SIDE];
+
+        'outer: while !frontier.is_empty() {
+            if let Some(cur) = frontier.pop_front() {
+                let neighbors = self.get_neighbors(&cur);
+                let mut it = neighbors.iter();
+                while let Some(neighbor) = it.next() {
+                    if !came_from[neighbor.x][neighbor.y].1 {
+                        frontier.push_back(neighbor.clone());
+                        came_from[neighbor.x][neighbor.y] = (Point::from((cur.x, cur.y)), true);
+                        if neighbor == &self.end.unwrap() { break 'outer; }
+                    }
+                }
+            }
+        }
+
+        self.clear_path();
+
+        let mut current = self.end.clone().unwrap();
+        let goal = self.start.clone().unwrap();
+        self.path.push_back(current);
+        while current != goal {
+            let cm = came_from[current.x][current.y].0;
+            current = Point::from((cm.x, cm.y));
             self.path.push_back(current);
         }
         self.enter_path();
@@ -165,9 +255,9 @@ impl App {
         {
             let mut it = self.path.iter();
             while let Some(current) = it.next() {
-                match self.grid[current.0 as usize][current.1 as usize] {
+                match self.grid[current.x][current.y] {
                     Block::Weighted {weight: w, on_path: _ } => {
-                        self.grid[current.0 as usize][current.1 as usize] = Block::Weighted { weight: w, on_path: true };
+                        self.grid[current.x][current.y] = Block::Weighted { weight: w, on_path: true };
                     },
                     _ => {}
                 };
@@ -177,19 +267,19 @@ impl App {
 
     fn click(&mut self, args: MouseButton) {
         let offset = self.window_side / App::SIDE;
-        let x = self.location.0 / offset as u32;
-        let y = self.location.1 / offset as u32;
+        let x = self.location.x / offset as usize;
+        let y = self.location.y / offset as usize;
         match args {
             mouse::MouseButton::Left => {
-                if self.end.is_none() ||  self.end.clone().unwrap() != (x,y) {
-                    self.start = Some((x,y));
-                    self.calc_path();
+                if self.end.is_none() ||  self.end.clone().unwrap() != Point::from((x,y)) {
+                    self.start = Some(Point::from((x,y)));
+                    self.calc_dijkstras_path();
                 }
             },
             mouse::MouseButton::Right => {
-                if self.start.is_none() || self.start.clone().unwrap() != (x,y) {
-                    self.end = Some((x,y));
-                    self.calc_path();
+                if self.start.is_none() || self.start.clone().unwrap() != Point::from((x,y)) {
+                    self.end = Some(Point::from((x,y)));
+                    self.calc_dijkstras_path();
                 }
 
             },
@@ -214,10 +304,10 @@ fn main() {
 
     let mut app = App {
         gl: GlGraphics::new(opengl),
-        window_side: WINDOW_SIDE,
+        window_side: WINDOW_SIDE as usize,
         path: LinkedList::new(),
         grid: read_map(),
-        location: (0, 0),
+        location: Point::from((0, 0)),
         start: None,
         end: None,
     };
@@ -239,7 +329,7 @@ fn main() {
         }
 
         if let Some(c) = e.mouse_cursor_args() {
-            let temp: (u32, u32) = (c[0] as u32, c[1] as u32);
+            let temp = Point::from((c[0] as usize, c[1] as usize));
             app.location = temp;
         }
     }
@@ -267,7 +357,7 @@ fn chop_line(line: &String) -> Vec<Block> {
             Ok(i) if i < 0 => {
                 grid_line.push(Block::Blocked)
             },
-            Ok(i) => grid_line.push(Block::Weighted{weight: i as u32, on_path: false}),
+            Ok(i) => grid_line.push(Block::Weighted{weight: i as usize, on_path: false}),
             Err(_) => {}
         };
     }
